@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>TV Focus Test — Матрица 5x3</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #0b0b0b;
+    color: #fff;
+    font-family: Arial, sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  h1 {
+    font-size: 28px;
+    margin-bottom: 20px;
+    color: #4fc3f7;
+  }
+
+  #grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(5, 1fr);
+    gap: 14px;
+    width: 90vw;
+    max-width: 720px;
+    height: 65vh;
+  }
+
+  .cell {
+    background: #1e1e1e;
+    border: 3px solid #333;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    font-weight: bold;
+    color: #888;
+    transition: all 0.15s ease;
+  }
+
+  .cell.focused {
+    background: #1565c0;
+    border-color: #4fc3f7;
+    color: #fff;
+    transform: scale(1.05);
+    box-shadow: 0 0 25px rgba(79, 195, 247, 0.7);
+  }
+
+  .cell.active {
+    background: #2e7d32;
+    border-color: #81c784;
+    color: #fff;
+  }
+
+  #log {
+    margin-top: 20px;
+    font-size: 14px;
+    color: #aaa;
+    height: 60px;
+    text-align: center;
+    line-height: 1.5;
+  }
+
+  #log b { color: #4fc3f7; }
+
+  #hint {
+    position: fixed;
+    bottom: 10px;
+    font-size: 12px;
+    color: #555;
+  }
+</style>
+</head>
+<body>
+
+  <h1>TV Focus Test 5×3</h1>
+
+  <div id="grid"></div>
+
+  <div id="log">Нажмите стрелки на пульте…</div>
+
+  <div id="hint">Стрелки — навигация · OK — выбор · Back — сброс</div>
+
+<script>
+  const ROWS = 5;
+  const COLS = 3;
+
+  let row = 0;
+  let col = 0;
+
+  const grid = document.getElementById('grid');
+  const log = document.getElementById('log');
+
+  // Создаём ячейки
+  const cells = [];
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.textContent = `${r + 1},${c + 1}`;
+      cell.dataset.row = r;
+      cell.dataset.col = c;
+      grid.appendChild(cell);
+      cells.push(cell);
+    }
+  }
+
+  function getCell(r, c) {
+    return cells[r * COLS + c];
+  }
+
+  function updateFocus() {
+    cells.forEach(c => c.classList.remove('focused'));
+    const current = getCell(row, col);
+    current.classList.add('focused');
+    log.innerHTML = `Фокус: <b>${row + 1},${col + 1}</b>`;
+  }
+
+  function resetFocus() {
+    cells.forEach(c => {
+      c.classList.remove('focused');
+      c.classList.remove('active');
+    });
+    row = 0;
+    col = 0;
+    updateFocus();
+    log.innerHTML = 'Сброс. Фокус: <b>1,1</b>';
+  }
+
+  function activate() {
+    const current = getCell(row, col);
+    current.classList.toggle('active');
+    log.innerHTML = `Активирована ячейка <b>${row + 1},${col + 1}</b>`;
+  }
+
+  // Обработка клавиш
+  function handleKey(e) {
+    const key = e.key;
+    const code = e.keyCode;
+
+    // Логируем всё, что приходит от системы
+    console.log('KEY:', key, 'CODE:', code);
+
+    switch (key) {
+      case 'ArrowUp':
+        if (row > 0) row--;
+        updateFocus();
+        e.preventDefault();
+        break;
+
+      case 'ArrowDown':
+        if (row < ROWS - 1) row++;
+        updateFocus();
+        e.preventDefault();
+        break;
+
+      case 'ArrowLeft':
+        if (col > 0) col--;
+        updateFocus();
+        e.preventDefault();
+        break;
+
+      case 'ArrowRight':
+        if (col < COLS - 1) col++;
+        updateFocus();
+        e.preventDefault();
+        break;
+
+      case 'Enter':
+      case ' ':
+        activate();
+        e.preventDefault();
+        break;
+
+      case 'Escape':
+      case 'Backspace':
+        resetFocus();
+        e.preventDefault();
+        break;
+
+      default:
+        // Показываем неизвестные клавиши — это поможет понять,
+        // какие коды шлёт пульт Vidaa OS
+        log.innerHTML = `Неизвестная клавиша: <b>${key || code}</b>`;
+        break;
+    }
+  }
+
+  // Слушаем на документе, чтобы поймать всё
+  document.addEventListener('keydown', handleKey, true);
+
+  // Некоторые ТВ-браузеры шлют keyup вместо keydown
+  document.addEventListener('keyup', function(e) {
+    if (e.key === 'Unidentified' || !e.key) {
+      handleKey(e);
+    }
+  }, true);
+
+  // Стартовый фокус
+  updateFocus();
+
+  // Дополнительно: на некоторых телевизорах полезно явно
+  // перехватывать onkeydown на body
+  document.body.onkeydown = handleKey;
+</script>
+
+</body>
+</html>
