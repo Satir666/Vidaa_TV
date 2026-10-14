@@ -66,45 +66,22 @@
     box-shadow: 0 0 25px rgba(79, 195, 247, 0.7);
   }
 
-  /* ===== Полноэкранный плеер ===== */
+  /* ===== Полноэкранный плеер (без верхней панели) ===== */
   #player-overlay {
     display: none;
     position: fixed;
     inset: 0;
     background: #000;
     z-index: 1000;
-    flex-direction: column;
   }
 
   #player-overlay.visible {
-    display: flex;
-  }
-
-  #player-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 18px;
-    background: rgba(0,0,0,0.8);
-    font-size: 18px;
-    color: #4fc3f7;
-    flex-shrink: 0;
-  }
-
-  #player-header .channel-name {
-    font-weight: bold;
-  }
-
-  #player-header .hint {
-    font-size: 13px;
-    color: #888;
+    display: block;
   }
 
   #video-container {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    width: 100%;
+    height: 100%;
     background: #000;
     position: relative;
   }
@@ -114,23 +91,32 @@
     height: 100%;
     object-fit: contain;
     background: #000;
+    display: block;
   }
 
   #loading {
     position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
     color: #4fc3f7;
     font-size: 18px;
   }
 
   #error-msg {
     position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
     color: #ef5350;
     font-size: 16px;
     text-align: center;
     padding: 20px;
     display: none;
+    max-width: 80%;
   }
 
+  /* Подсказка только на экране списка каналов */
   #hint-bottom {
     position: fixed;
     bottom: 8px;
@@ -139,6 +125,12 @@
     font-size: 12px;
     color: #555;
     pointer-events: none;
+    transition: opacity 0.2s;
+  }
+
+  /* Скрываем подсказку, когда открыт плеер */
+  #hint-bottom.hidden {
+    opacity: 0;
   }
 </style>
 </head>
@@ -152,14 +144,10 @@
 
 <!-- ===== Полноэкранный плеер ===== -->
 <div id="player-overlay">
-  <div id="player-header">
-    <span class="channel-name" id="player-channel-name"></span>
-    <span class="hint">Нажмите «Назад» для выхода</span>
-  </div>
   <div id="video-container">
     <div id="loading">Загрузка потока…</div>
     <div id="error-msg"></div>
-    <video id="video" controls autoplay playsinline></video>
+    <video id="video" autoplay playsinline></video>
   </div>
 </div>
 
@@ -171,8 +159,6 @@
 <script>
 /* ================================================================
    СПИСОК КАНАЛОВ
-   URL-адреса взяты из публичных IPTV-плейлистов.
-   Если какой-то поток перестанет работать, его можно заменить.
    ================================================================ */
 const CHANNELS = [
   { name: 'Первый',        url: 'https://zabava-htlive.cdn.ngenix.net/hls/CH_1TVSD/variant.m3u8' },
@@ -198,21 +184,21 @@ const CHANNELS = [
 /* ================================================================
    СОСТОЯНИЕ
    ================================================================ */
-let focusedIndex = 0;         // индекс канала в фокусе
-let currentChannel = null;    // канал, который сейчас играет
-let hls = null;               // экземпляр Hls.js
+let focusedIndex = 0;
+let currentChannel = null;
+let hls = null;
 let lastKeyTime = 0;
-const MIN_INTERVAL = 120;     // мс — защита от двойных срабатываний
+const MIN_INTERVAL = 120;
 
 /* ================================================================
    DOM-ЭЛЕМЕНТЫ
    ================================================================ */
 const grid = document.getElementById('grid');
 const playerOverlay = document.getElementById('player-overlay');
-const playerChannelName = document.getElementById('player-channel-name');
 const video = document.getElementById('video');
 const loadingEl = document.getElementById('loading');
 const errorEl = document.getElementById('error-msg');
+const hintBottom = document.getElementById('hint-bottom');
 
 /* ================================================================
    ПОСТРОЕНИЕ СЕТКИ КАНАЛОВ
@@ -248,18 +234,10 @@ function moveFocus(direction) {
   let newIndex = focusedIndex;
 
   switch (direction) {
-    case 'up':
-      newIndex = focusedIndex - COLS;
-      break;
-    case 'down':
-      newIndex = focusedIndex + COLS;
-      break;
-    case 'left':
-      newIndex = focusedIndex - 1;
-      break;
-    case 'right':
-      newIndex = focusedIndex + 1;
-      break;
+    case 'up':    newIndex = focusedIndex - COLS; break;
+    case 'down':  newIndex = focusedIndex + COLS; break;
+    case 'left':  newIndex = focusedIndex - 1; break;
+    case 'right': newIndex = focusedIndex + 1; break;
   }
 
   if (newIndex >= 0 && newIndex < CHANNELS.length) {
@@ -268,7 +246,6 @@ function moveFocus(direction) {
   }
 }
 
-/** Определяем количество колонок в сетке */
 function getColumnCount() {
   if (!buttons.length) return 1;
   const firstTop = buttons[0].getBoundingClientRect().top;
@@ -288,20 +265,17 @@ function getColumnCount() {
    ================================================================ */
 function openPlayer(channel) {
   currentChannel = channel;
-  playerChannelName.textContent = channel.name;
   playerOverlay.classList.add('visible');
+  hintBottom.classList.add('hidden');
 
-  // Показываем загрузку, скрываем ошибку
   loadingEl.style.display = 'block';
   errorEl.style.display = 'none';
 
-  // Уничтожаем предыдущий экземпляр Hls
   if (hls) {
     hls.destroy();
     hls = null;
   }
 
-  // Останавливаем текущее видео
   video.pause();
   video.removeAttribute('src');
   video.load();
@@ -310,7 +284,6 @@ function openPlayer(channel) {
     hls = new Hls({
       enableWorker: true,
       lowLatencyMode: true,
-      // Не начинать с максимального качества — быстрее старт
       startLevel: -1
     });
 
@@ -321,7 +294,6 @@ function openPlayer(channel) {
       loadingEl.style.display = 'none';
       video.play().catch(err => {
         console.warn('Autoplay blocked:', err);
-        // Если автовоспроизведение заблокировано — показываем подсказку
         errorEl.textContent = 'Нажмите OK / Enter для начала воспроизведения';
         errorEl.style.display = 'block';
       });
@@ -346,7 +318,6 @@ function openPlayer(channel) {
       }
     });
   } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    // Safari / нативная поддержка HLS
     video.src = channel.url;
     video.addEventListener('loadedmetadata', function onMeta() {
       video.removeEventListener('loadedmetadata', onMeta);
@@ -370,21 +341,18 @@ function openPlayer(channel) {
 }
 
 function closePlayer() {
-  // Останавливаем видео
   video.pause();
   video.removeAttribute('src');
   video.load();
 
-  // Уничтожаем Hls
   if (hls) {
     hls.destroy();
     hls = null;
   }
 
   playerOverlay.classList.remove('visible');
+  hintBottom.classList.remove('hidden');
   currentChannel = null;
-
-  // Возвращаем фокус на кнопку канала
   updateFocus();
 }
 
@@ -396,19 +364,16 @@ function handleKey(e) {
   const key = e.key;
   const code = e.keyCode;
 
-  // Логируем для отладки (можно убрать позже)
   console.log('KEY:', key, 'CODE:', code, 'repeat:', e.repeat);
 
   /* ---- Если открыт плеер ---- */
   if (playerOverlay.classList.contains('visible')) {
-    // Кнопка «Назад» на пультах: Escape, Backspace, код 461 (Vidaa)
     if (key === 'Escape' || key === 'Backspace' || code === 461 || key === 'GoBack') {
       e.preventDefault();
       closePlayer();
       return;
     }
 
-    // OK / Enter — запустить воспроизведение, если автоплей не сработал
     if (key === 'Enter' || key === ' ' || code === 13) {
       if (video.paused) {
         video.play().catch(err => console.warn('Play failed:', err));
@@ -418,7 +383,6 @@ function handleKey(e) {
       return;
     }
 
-    // Блокируем остальные стрелки в плеере
     if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(key)) {
       e.preventDefault();
       return;
@@ -427,7 +391,6 @@ function handleKey(e) {
   }
 
   /* ---- Если открыт список каналов ---- */
-  // Защита от двойных срабатываний
   if (now - lastKeyTime < MIN_INTERVAL && !e.repeat) {
     return;
   }
@@ -457,7 +420,6 @@ function handleKey(e) {
     case 'Enter':
     case ' ':
     case 'OK':
-      // Выбор канала
       if (buttons[focusedIndex]) {
         const idx = parseInt(buttons[focusedIndex].dataset.index);
         openPlayer(CHANNELS[idx]);
@@ -473,12 +435,7 @@ function handleKey(e) {
 buildGrid();
 updateFocus();
 
-// Один-единственный обработчик keydown — без дублирования
 document.addEventListener('keydown', handleKey, true);
-
-// Для некоторых ТВ-браузеров: перехватываем и onkeydown на body,
-// но только как fallback, если keydown не сработал.
-// НЕ добавляем второй addEventListener — это вызовет двойные срабатывания.
 </script>
 
 </body>
