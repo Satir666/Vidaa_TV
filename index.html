@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>TV Focus Test — Матрица 5x3</title>
+<title>Российские ТВ каналы</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -12,44 +12,53 @@
     color: #fff;
     font-family: Arial, sans-serif;
     height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
     overflow: hidden;
     user-select: none;
   }
 
+  /* ===== Сетка каналов ===== */
+  #channels-view {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+
   h1 {
-    font-size: 28px;
-    margin-bottom: 20px;
+    text-align: center;
+    font-size: 26px;
+    padding: 16px 0 8px;
     color: #4fc3f7;
+    flex-shrink: 0;
   }
 
   #grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    grid-template-rows: repeat(5, 1fr);
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 14px;
-    width: 90vw;
-    max-width: 720px;
-    height: 65vh;
+    padding: 16px 24px 24px;
+    overflow-y: auto;
+    flex: 1;
   }
 
-  .cell {
+  .channel-btn {
     background: #1e1e1e;
     border: 3px solid #333;
     border-radius: 12px;
+    padding: 18px 10px;
+    font-size: 18px;
+    font-weight: bold;
+    color: #bbb;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 26px;
-    font-weight: bold;
-    color: #888;
-    transition: all 0.15s ease;
+    min-height: 70px;
+    word-break: break-word;
   }
 
-  .cell.focused {
+  .channel-btn.focused {
     background: #1565c0;
     border-color: #4fc3f7;
     color: #fff;
@@ -57,162 +66,419 @@
     box-shadow: 0 0 25px rgba(79, 195, 247, 0.7);
   }
 
-  .cell.active {
-    background: #2e7d32;
-    border-color: #81c784;
-    color: #fff;
-  }
-
-  #log {
-    margin-top: 20px;
-    font-size: 14px;
-    color: #aaa;
-    height: 60px;
-    text-align: center;
-    line-height: 1.5;
-  }
-
-  #log b { color: #4fc3f7; }
-
-  #hint {
+  /* ===== Полноэкранный плеер ===== */
+  #player-overlay {
+    display: none;
     position: fixed;
-    bottom: 10px;
+    inset: 0;
+    background: #000;
+    z-index: 1000;
+    flex-direction: column;
+  }
+
+  #player-overlay.visible {
+    display: flex;
+  }
+
+  #player-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 18px;
+    background: rgba(0,0,0,0.8);
+    font-size: 18px;
+    color: #4fc3f7;
+    flex-shrink: 0;
+  }
+
+  #player-header .channel-name {
+    font-weight: bold;
+  }
+
+  #player-header .hint {
+    font-size: 13px;
+    color: #888;
+  }
+
+  #video-container {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+    position: relative;
+  }
+
+  video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #000;
+  }
+
+  #loading {
+    position: absolute;
+    color: #4fc3f7;
+    font-size: 18px;
+  }
+
+  #error-msg {
+    position: absolute;
+    color: #ef5350;
+    font-size: 16px;
+    text-align: center;
+    padding: 20px;
+    display: none;
+  }
+
+  #hint-bottom {
+    position: fixed;
+    bottom: 8px;
+    width: 100%;
+    text-align: center;
     font-size: 12px;
     color: #555;
+    pointer-events: none;
   }
 </style>
 </head>
 <body>
 
-  <h1>TV Focus Test 5×3</h1>
-
+<!-- ===== Вид со списком каналов ===== -->
+<div id="channels-view">
+  <h1>📺 Российские ТВ каналы</h1>
   <div id="grid"></div>
+</div>
 
-  <div id="log">Нажмите стрелки на пульте…</div>
+<!-- ===== Полноэкранный плеер ===== -->
+<div id="player-overlay">
+  <div id="player-header">
+    <span class="channel-name" id="player-channel-name"></span>
+    <span class="hint">Нажмите «Назад» для выхода</span>
+  </div>
+  <div id="video-container">
+    <div id="loading">Загрузка потока…</div>
+    <div id="error-msg"></div>
+    <video id="video" controls autoplay playsinline></video>
+  </div>
+</div>
 
-  <div id="hint">Стрелки — навигация · OK — выбор · Back — сброс</div>
+<div id="hint-bottom">Стрелки — навигация · OK — выбор канала · Back — выход из плеера</div>
+
+<!-- hls.js для воспроизведения HLS в браузере -->
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
 
 <script>
-  const ROWS = 5;
-  const COLS = 3;
+/* ================================================================
+   СПИСОК КАНАЛОВ
+   URL-адреса взяты из публичных IPTV-плейлистов.
+   Если какой-то поток перестанет работать, его можно заменить.
+   ================================================================ */
+const CHANNELS = [
+  { name: 'Первый',        url: 'https://zabava-htlive.cdn.ngenix.net/hls/CH_1TVSD/variant.m3u8' },
+  { name: 'Россия 1',      url: 'https://zabava-htlive.cdn.ngenix.net/hls/CH_RUSSIA1/variant.m3u8' },
+  { name: 'Матч!',         url: 'https://zabava-htlive.cdn.ngenix.net/hls/CH_MATCHTV/variant.m3u8' },
+  { name: 'НТВ',           url: 'https://zabava-htlive.cdn.ngenix.net/hls/CH_NTV/variant.m3u8' },
+  { name: 'Пятый канал',   url: 'https://zabava-htlive.cdn.ngenix.net/hls/CH_5TV/variant.m3u8' },
+  { name: 'Россия К',      url: 'https://zabava-htlive.cdn.ngenix.net/hls/CH_RUSSIAK/variant.m3u8' },
+  { name: 'Россия 24',     url: 'https://zabava-htlive.cdn.ngenix.net/hls/CH_RUSSIA24/variant.m3u8' },
+  { name: 'Карусель',      url: 'https://zabava-htlive.cdn.ngenix.net/hls/CH_KARUSEL/variant.m3u8' },
+  { name: 'ТНТ',           url: 'http://ott-cdn.ucom.am/s19/index.m3u8' },
+  { name: 'СТС',           url: 'https://stream8.cinerama.uz/1064/index.m3u8' },
+  { name: 'Рен ТВ',        url: 'https://stream8.cinerama.uz/1044/index.m3u8' },
+  { name: 'Звезда',        url: 'https://tvchannelstream1.tvzvezda.ru/cdn/tvzvezda/playlist.m3u8' },
+  { name: 'ТВ-3',          url: 'https://streaming.televizor-24-tochka.ru/live/18.m3u8' },
+  { name: 'Пятница!',      url: 'https://streaming.televizor-24-tochka.ru/live/19.m3u8' },
+  { name: 'Мир',           url: 'http://hls.mirtv.cdnvideo.ru/mirtv-parampublish/mirtv_2500/playlist.m3u8' },
+  { name: 'Муз-ТВ',        url: 'https://streaming102.interskytech.com/live/618.m3u8' },
+  { name: 'РБК',           url: 'http://92.50.128.180/utv/1358/index.m3u8' },
+  { name: 'RT Д Русский',  url: 'https://hls.rt.com/hls/rtdru.m3u8' }
+];
 
-  let row = 0;
-  let col = 0;
+/* ================================================================
+   СОСТОЯНИЕ
+   ================================================================ */
+let focusedIndex = 0;         // индекс канала в фокусе
+let currentChannel = null;    // канал, который сейчас играет
+let hls = null;               // экземпляр Hls.js
+let lastKeyTime = 0;
+const MIN_INTERVAL = 120;     // мс — защита от двойных срабатываний
 
-  const grid = document.getElementById('grid');
-  const log = document.getElementById('log');
+/* ================================================================
+   DOM-ЭЛЕМЕНТЫ
+   ================================================================ */
+const grid = document.getElementById('grid');
+const playerOverlay = document.getElementById('player-overlay');
+const playerChannelName = document.getElementById('player-channel-name');
+const video = document.getElementById('video');
+const loadingEl = document.getElementById('loading');
+const errorEl = document.getElementById('error-msg');
 
-  // Создаём ячейки
-  const cells = [];
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      const cell = document.createElement('div');
-      cell.className = 'cell';
-      cell.textContent = `${r + 1},${c + 1}`;
-      cell.dataset.row = r;
-      cell.dataset.col = c;
-      grid.appendChild(cell);
-      cells.push(cell);
-    }
+/* ================================================================
+   ПОСТРОЕНИЕ СЕТКИ КАНАЛОВ
+   ================================================================ */
+const buttons = [];
+
+function buildGrid() {
+  grid.innerHTML = '';
+  buttons.length = 0;
+
+  CHANNELS.forEach((ch, idx) => {
+    const btn = document.createElement('div');
+    btn.className = 'channel-btn';
+    btn.textContent = ch.name;
+    btn.dataset.index = idx;
+    grid.appendChild(btn);
+    buttons.push(btn);
+  });
+}
+
+/* ================================================================
+   ФОКУС
+   ================================================================ */
+function updateFocus() {
+  buttons.forEach(b => b.classList.remove('focused'));
+  if (buttons[focusedIndex]) {
+    buttons[focusedIndex].classList.add('focused');
+  }
+}
+
+function moveFocus(direction) {
+  const COLS = getColumnCount();
+  let newIndex = focusedIndex;
+
+  switch (direction) {
+    case 'up':
+      newIndex = focusedIndex - COLS;
+      break;
+    case 'down':
+      newIndex = focusedIndex + COLS;
+      break;
+    case 'left':
+      newIndex = focusedIndex - 1;
+      break;
+    case 'right':
+      newIndex = focusedIndex + 1;
+      break;
   }
 
-  function getCell(r, c) {
-    return cells[r * COLS + c];
-  }
-
-  function updateFocus() {
-    cells.forEach(c => c.classList.remove('focused'));
-    const current = getCell(row, col);
-    current.classList.add('focused');
-    log.innerHTML = `Фокус: <b>${row + 1},${col + 1}</b>`;
-  }
-
-  function resetFocus() {
-    cells.forEach(c => {
-      c.classList.remove('focused');
-      c.classList.remove('active');
-    });
-    row = 0;
-    col = 0;
+  if (newIndex >= 0 && newIndex < CHANNELS.length) {
+    focusedIndex = newIndex;
     updateFocus();
-    log.innerHTML = 'Сброс. Фокус: <b>1,1</b>';
   }
+}
 
-  function activate() {
-    const current = getCell(row, col);
-    current.classList.toggle('active');
-    log.innerHTML = `Активирована ячейка <b>${row + 1},${col + 1}</b>`;
-  }
-
-  // Обработка клавиш
-  function handleKey(e) {
-    const key = e.key;
-    const code = e.keyCode;
-
-    // Логируем всё, что приходит от системы
-    console.log('KEY:', key, 'CODE:', code);
-
-    switch (key) {
-      case 'ArrowUp':
-        if (row > 0) row--;
-        updateFocus();
-        e.preventDefault();
-        break;
-
-      case 'ArrowDown':
-        if (row < ROWS - 1) row++;
-        updateFocus();
-        e.preventDefault();
-        break;
-
-      case 'ArrowLeft':
-        if (col > 0) col--;
-        updateFocus();
-        e.preventDefault();
-        break;
-
-      case 'ArrowRight':
-        if (col < COLS - 1) col++;
-        updateFocus();
-        e.preventDefault();
-        break;
-
-      case 'Enter':
-      case ' ':
-        activate();
-        e.preventDefault();
-        break;
-
-      case 'Escape':
-      case 'Backspace':
-        resetFocus();
-        e.preventDefault();
-        break;
-
-      default:
-        // Показываем неизвестные клавиши — это поможет понять,
-        // какие коды шлёт пульт Vidaa OS
-        log.innerHTML = `Неизвестная клавиша: <b>${key || code}</b>`;
-        break;
+/** Определяем количество колонок в сетке */
+function getColumnCount() {
+  if (!buttons.length) return 1;
+  const firstTop = buttons[0].getBoundingClientRect().top;
+  let count = 0;
+  for (let i = 0; i < buttons.length; i++) {
+    if (buttons[i].getBoundingClientRect().top === firstTop) {
+      count++;
+    } else {
+      break;
     }
   }
+  return count || 1;
+}
 
-  // Слушаем на документе, чтобы поймать всё
-  document.addEventListener('keydown', handleKey, true);
+/* ================================================================
+   ПЛЕЕР
+   ================================================================ */
+function openPlayer(channel) {
+  currentChannel = channel;
+  playerChannelName.textContent = channel.name;
+  playerOverlay.classList.add('visible');
 
-  // Некоторые ТВ-браузеры шлют keyup вместо keydown
-  document.addEventListener('keyup', function(e) {
-    if (e.key === 'Unidentified' || !e.key) {
-      handleKey(e);
-    }
-  }, true);
+  // Показываем загрузку, скрываем ошибку
+  loadingEl.style.display = 'block';
+  errorEl.style.display = 'none';
 
-  // Стартовый фокус
+  // Уничтожаем предыдущий экземпляр Hls
+  if (hls) {
+    hls.destroy();
+    hls = null;
+  }
+
+  // Останавливаем текущее видео
+  video.pause();
+  video.removeAttribute('src');
+  video.load();
+
+  if (Hls.isSupported()) {
+    hls = new Hls({
+      enableWorker: true,
+      lowLatencyMode: true,
+      // Не начинать с максимального качества — быстрее старт
+      startLevel: -1
+    });
+
+    hls.loadSource(channel.url);
+    hls.attachMedia(video);
+
+    hls.on(Hls.Events.MANIFEST_PARSED, function () {
+      loadingEl.style.display = 'none';
+      video.play().catch(err => {
+        console.warn('Autoplay blocked:', err);
+        // Если автовоспроизведение заблокировано — показываем подсказку
+        errorEl.textContent = 'Нажмите OK / Enter для начала воспроизведения';
+        errorEl.style.display = 'block';
+      });
+    });
+
+    hls.on(Hls.Events.ERROR, function (event, data) {
+      console.error('HLS error:', data);
+      if (data.fatal) {
+        switch (data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            errorEl.textContent = 'Ошибка сети. Попробуйте другой канал.';
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            errorEl.textContent = 'Ошибка медиа. Попробуйте другой канал.';
+            break;
+          default:
+            errorEl.textContent = 'Не удалось загрузить поток.';
+            break;
+        }
+        errorEl.style.display = 'block';
+        loadingEl.style.display = 'none';
+      }
+    });
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    // Safari / нативная поддержка HLS
+    video.src = channel.url;
+    video.addEventListener('loadedmetadata', function onMeta() {
+      video.removeEventListener('loadedmetadata', onMeta);
+      loadingEl.style.display = 'none';
+      video.play().catch(() => {
+        errorEl.textContent = 'Нажмите OK / Enter для начала воспроизведения';
+        errorEl.style.display = 'block';
+      });
+    });
+    video.addEventListener('error', function onErr() {
+      video.removeEventListener('error', onErr);
+      errorEl.textContent = 'Не удалось загрузить поток.';
+      errorEl.style.display = 'block';
+      loadingEl.style.display = 'none';
+    });
+  } else {
+    errorEl.textContent = 'Ваш браузер не поддерживает HLS.';
+    errorEl.style.display = 'block';
+    loadingEl.style.display = 'none';
+  }
+}
+
+function closePlayer() {
+  // Останавливаем видео
+  video.pause();
+  video.removeAttribute('src');
+  video.load();
+
+  // Уничтожаем Hls
+  if (hls) {
+    hls.destroy();
+    hls = null;
+  }
+
+  playerOverlay.classList.remove('visible');
+  currentChannel = null;
+
+  // Возвращаем фокус на кнопку канала
   updateFocus();
+}
 
-  // Дополнительно: на некоторых телевизорах полезно явно
-  // перехватывать onkeydown на body
-  document.body.onkeydown = handleKey;
+/* ================================================================
+   ОБРАБОТКА КЛАВИШ
+   ================================================================ */
+function handleKey(e) {
+  const now = Date.now();
+  const key = e.key;
+  const code = e.keyCode;
+
+  // Логируем для отладки (можно убрать позже)
+  console.log('KEY:', key, 'CODE:', code, 'repeat:', e.repeat);
+
+  /* ---- Если открыт плеер ---- */
+  if (playerOverlay.classList.contains('visible')) {
+    // Кнопка «Назад» на пультах: Escape, Backspace, код 461 (Vidaa)
+    if (key === 'Escape' || key === 'Backspace' || code === 461 || key === 'GoBack') {
+      e.preventDefault();
+      closePlayer();
+      return;
+    }
+
+    // OK / Enter — запустить воспроизведение, если автоплей не сработал
+    if (key === 'Enter' || key === ' ' || code === 13) {
+      if (video.paused) {
+        video.play().catch(err => console.warn('Play failed:', err));
+        errorEl.style.display = 'none';
+      }
+      e.preventDefault();
+      return;
+    }
+
+    // Блокируем остальные стрелки в плеере
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(key)) {
+      e.preventDefault();
+      return;
+    }
+    return;
+  }
+
+  /* ---- Если открыт список каналов ---- */
+  // Защита от двойных срабатываний
+  if (now - lastKeyTime < MIN_INTERVAL && !e.repeat) {
+    return;
+  }
+  lastKeyTime = now;
+
+  switch (key) {
+    case 'ArrowUp':
+      moveFocus('up');
+      e.preventDefault();
+      break;
+
+    case 'ArrowDown':
+      moveFocus('down');
+      e.preventDefault();
+      break;
+
+    case 'ArrowLeft':
+      moveFocus('left');
+      e.preventDefault();
+      break;
+
+    case 'ArrowRight':
+      moveFocus('right');
+      e.preventDefault();
+      break;
+
+    case 'Enter':
+    case ' ':
+    case 'OK':
+      // Выбор канала
+      if (buttons[focusedIndex]) {
+        const idx = parseInt(buttons[focusedIndex].dataset.index);
+        openPlayer(CHANNELS[idx]);
+      }
+      e.preventDefault();
+      break;
+  }
+}
+
+/* ================================================================
+   ИНИЦИАЛИЗАЦИЯ
+   ================================================================ */
+buildGrid();
+updateFocus();
+
+// Один-единственный обработчик keydown — без дублирования
+document.addEventListener('keydown', handleKey, true);
+
+// Для некоторых ТВ-браузеров: перехватываем и onkeydown на body,
+// но только как fallback, если keydown не сработал.
+// НЕ добавляем второй addEventListener — это вызовет двойные срабатывания.
 </script>
 
 </body>
